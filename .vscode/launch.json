@@ -11,7 +11,13 @@
             "miDebuggerServerAddress": "127.0.0.1:26000", //见.gdbinit 中 target remote xxxx:xx
             "miDebuggerPath": "/usr/bin/gdb-multiarch", // which gdb-multiarch
             "MIMode": "gdb",
-            "preLaunchTask": "xv6build"
+            "preLaunchTask": "xv6build",
+            "setupCommands": [
+                {
+                    // 指定要加载的符号表，虚起始地址可以在user.ld: .text处查看
+                    "text": "add-symbol-file ${workspaceFolder}/user/_sixfive 0x0"
+                }
+            ]
         }
     ]
 }
