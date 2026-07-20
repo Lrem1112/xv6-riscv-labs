@@ -13,10 +13,10 @@
             "MIMode": "gdb",
             "preLaunchTask": "xv6build",
             "setupCommands": [
-                {
-                    // 指定要加载的符号表，虚起始地址可以在user.ld: .text处查看
-                    "text": "add-symbol-file ${workspaceFolder}/user/_memdump 0x0"
-                }
+                // {
+                //     // 指定要加载的符号表，虚起始地址可以在user.ld: .text处查看
+                //     "text": "add-symbol-file ${workspaceFolder}/user/_memdump 0x0"
+                // }
             ]
         }
     ]
