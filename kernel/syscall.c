@@ -127,9 +127,19 @@ syscall(void)
 
   num = p->trapframe->a7;
   if ((1 << num) & p->mask) {
+    // 如果是 open 或 exec，且路径匹配 → 放行
+    if ((num == SYS_open || num == SYS_exec) &&
+        !(p->allowPath[0] == '-' && p->allowPath[1] == '\0')) {
+      char path[MAXPATH];
+      int len = argstr(0, path, MAXPATH); // 从 trapframe->a0 取路径
+      if (strncmp(path, p->allowPath, len) == 0) {
+        goto allow; // 路径匹配，放行
+      }
+    }
     p->trapframe->a0 = -1;
     return;
   }
+allow:
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0
