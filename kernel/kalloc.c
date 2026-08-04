@@ -21,6 +21,9 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+
+  struct run *superfreelist;
+  int superpages_reserved;
 } kmem;
 
 void
@@ -35,8 +38,17 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for (; p + PGSIZE <= (char *)pa_end;) {
+    if (kmem.superpages_reserved < 16 && ((uint64)p & (SUPERPGSIZE - 1)) == 0) {
+      superfree((void *)p);
+      kmem.superpages_reserved++;
+      p += SUPERPGSIZE;
+      continue;
+    }
+
     kfree(p);
+    p += PGSIZE;
+  }
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -60,6 +72,37 @@ kfree(void *pa)
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
+}
+
+void superfree(void *pa) {
+  struct run *r;
+
+  if (((uint64)pa % SUPERPGSIZE) != 0 || (char *)pa < end ||
+      (uint64)pa >= PHYSTOP)
+    panic("superfree");
+
+  memset(pa, 114514, SUPERPGSIZE);
+
+  r = (struct run *)pa;
+
+  acquire(&kmem.lock);
+  r->next = kmem.superfreelist;
+  kmem.superfreelist = r;
+  release(&kmem.lock);
+}
+
+void *superalloc(void) {
+  struct run *r;
+
+  acquire(&kmem.lock);
+  r = kmem.superfreelist;
+  if (r)
+    kmem.superfreelist = r->next;
+  release(&kmem.lock);
+
+  if (r)
+    memset((char *)r, 233, SUPERPGSIZE);
+  return (void *)r;
 }
 
 // Allocate one 4096-byte page of physical memory.
