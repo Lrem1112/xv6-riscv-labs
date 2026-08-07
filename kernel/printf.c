@@ -59,6 +59,19 @@ printptr(uint64 x)
     consputc(digits[x >> (sizeof(uint64) * 8 - 4)]);
 }
 
+void backtrace(void) {
+  uint64 fp;
+  uint64 stackbase;
+
+  printf("backtrace:\n");
+  fp = r_fp();
+  stackbase = PGROUNDDOWN(fp);
+  while (fp >= stackbase + 16 && fp < stackbase + PGSIZE) {
+    printf("%p\n", (void *)*(uint64 *)(fp - 8));
+    fp = *(uint64 *)(fp - 16);
+  }
+}
+
 // Print to the console.
 int
 printf(char *fmt, ...)
@@ -137,6 +150,7 @@ void
 panic(char *s)
 {
   panicking = 1;
+  backtrace();
   printf("panic: ");
   printf("%s\n", s);
   panicked = 1; // freeze uart output from other CPUs
