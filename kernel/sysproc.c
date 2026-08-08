@@ -94,6 +94,36 @@ sys_kill(void)
   return kkill(pid);
 }
 
+// alarm lab: 设置进程的 alarm。
+// 每 interval 个 CPU tick，内核调用一次 handler；interval 为 0 时关闭 alarm。
+uint64
+sys_sigalarm(void)
+{
+  int interval;
+  uint64 handler;
+
+  argint(0, &interval);
+  argaddr(1, &handler);
+
+  struct proc *p = myproc();
+  p->alarm_interval = interval;
+  p->alarm_handler = handler;
+
+  return 0;
+}
+
+// alarm lab: 从 alarm handler 返回。
+// 恢复 alarm 触发时保存下来的用户态现场。
+uint64
+sys_sigreturn(void)
+{
+  struct proc *p = myproc();
+  p->alarm_active = 0;
+  *(p->trapframe) = *(p->alarm_tp);
+
+  return p->trapframe->a0;
+}
+
 // return how many clock tick interrupts have occurred
 // since start.
 uint64

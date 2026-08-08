@@ -104,4 +104,12 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // alarm lab: sigalarm()/sigreturn() 用到的状态
+  // 这些字段属于进程私有，不需要 p->lock
+  int alarm_interval;         // alarm 周期（单位 CPU tick）；0 表示未开启
+  uint64 alarm_handler;       // alarm handler 在用户空间的地址
+  int alarm_ticks;            // 自上次 alarm 触发以来经过的 CPU tick 数
+  int alarm_active;           // 1 表示 handler 正在运行（防止重入）
+  struct trapframe *alarm_tp; // 发生alarm调用时保存栈帧
 };

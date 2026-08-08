@@ -1,22 +1,27 @@
 {
-    "version": "0.2.0",
-    "configurations": [
+    "version": "2.0.0",
+    "tasks": [
         {
-            "name": "xv6debug",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/kernel/kernel",
-            "stopAtEntry": true,
-            "cwd": "${workspaceFolder}",
-            "miDebuggerServerAddress": "127.0.0.1:26000", //见.gdbinit 中 target remote xxxx:xx
-            "miDebuggerPath": "/usr/bin/gdb-multiarch", // which gdb-multiarch
-            "MIMode": "gdb",
-            "preLaunchTask": "xv6build",
-            "setupCommands": [
-                // {
-                //     // 指定要加载的符号表，虚起始地址可以在user.ld: .text处查看
-                //     "text": "add-symbol-file ${workspaceFolder}/user/_memdump 0x0"
-                // }
+            "label": "xv6build",
+            "type": "shell",
+            "isBackground": true,
+            "command": "make CPU=1 qemu-gdb",
+            "problemMatcher": [
+                {
+                    "pattern": [
+                        {
+                            "regexp": ".",
+                            "file": 1,
+                            "location": 2,
+                            "message": 3
+                        }
+                    ],
+                    "background": {
+                        "beginsPattern": ".*Now run 'gdb' in another window.",
+                        // 要对应编译成功后,一句echo的内容. 此处对应 Makefile Line:170
+                        "endsPattern": "."
+                    }
+                }
             ]
         }
     ]
