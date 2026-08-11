@@ -12,10 +12,11 @@
             "miDebuggerPath": "/usr/bin/gdb-multiarch", // which gdb-multiarch
             "MIMode": "gdb",
             "preLaunchTask": "xv6build",
+            "postDebugTask": "kill-qemu",
             "setupCommands": [
                 {
                     // 指定要加载的符号表，虚起始地址可以在user.ld: .text处查看
-                    "text": "add-symbol-file ${workspaceFolder}/user/_memdump 0x0"
+                    "text": "add-symbol-file ${workspaceFolder}/user/_cowtest 0x0"
                 }
             ]
         }

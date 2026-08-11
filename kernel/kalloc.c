@@ -9,6 +9,13 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define MREF_IDX(_pa) ((((uint64)_pa) - KERNBASE) / PGSIZE)
+
+struct ref {
+  struct spinlock lock;
+  int cnt[MREF_IDX(PHYSTOP)];
+} memref;
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -27,6 +34,7 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&memref.lock, "memref");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -35,8 +43,12 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE){
+    acquire(&memref.lock);
+    memref.cnt[MREF_IDX(p)] = 1;
+    release(&memref.lock);
     kfree(p);
+  }
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -50,13 +62,23 @@ kfree(void *pa)
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
-
+  
+  r = (struct run*)pa;
+  
+  acquire(&kmem.lock);
+  acquire(&memref.lock);
+  int cnt = --memref.cnt[MREF_IDX(pa)];
+  release(&memref.lock);
+  if (cnt < 0) {
+    printf("pa=0x%lx\n", (uint64)pa);
+    panic("kfree: double-free\n");
+  }
+  if (cnt > 0) {
+    release(&kmem.lock);
+    return;
+  }
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
-
-  r = (struct run*)pa;
-
-  acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
@@ -72,11 +94,21 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if (r) {
     kmem.freelist = r->next;
+    acquire(&memref.lock);
+    memref.cnt[MREF_IDX(r)] = 1;
+    release(&memref.lock);
+  }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+void ref_increase(uint64 pa) {
+  acquire(&memref.lock);
+  ++memref.cnt[MREF_IDX(pa)];
+  release(&memref.lock);
 }
