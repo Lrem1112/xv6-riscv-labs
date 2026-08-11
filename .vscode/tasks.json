@@ -1,0 +1,34 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "kill-qemu",
+            "type": "shell",
+            "command": "pkill -f '[q]emu-system-riscv64' || true",
+            "problemMatcher": []
+        },
+        {
+            "label": "xv6build",
+            "type": "shell",
+            "isBackground": true,
+            "command": "for i in $(seq 1 10); do pkill -f '[q]emu-system-riscv64' 2>/dev/null; pgrep -f '[q]emu-system-riscv64' >/dev/null || break; sleep 0.5; done; make qemu-gdb",
+            "problemMatcher": [
+                {
+                    "pattern": [
+                        {
+                            "regexp": ".",
+                            "file": 1,
+                            "location": 2,
+                            "message": 3
+                        }
+                    ],
+                    "background": {
+                        "beginsPattern": ".*Now run 'gdb' in another window.",
+                        // 要对应编译成功后,一句echo的内容. 此处对应 Makefile Line:170
+                        "endsPattern": "."
+                    }
+                }
+            ]
+        }
+    ]
+}
