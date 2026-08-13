@@ -104,8 +104,23 @@ e1000_transmit(char *buf, int len)
   // return -1 on failure (e.g., there is no descriptor available)
   // so that the caller knows to free buf.
   //
-
+  uint32 tidx = regs[E1000_TDT];
+  struct tx_desc *t = &tx_ring[tidx];
   
+  if (!(t->status & E1000_TXD_STAT_DD))
+    return -1;
+
+  acquire(&e1000_lock);
+  if (t->addr)
+    kfree((void *)t->addr);
+  t->addr = (uint64)buf;
+  t->length = len;
+  t->cmd = (E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS);
+  t->status = 0;
+
+  regs[E1000_TDT] = (tidx + 1) % TX_RING_SIZE;
+  release(&e1000_lock);
+
   return 0;
 }
 
@@ -118,6 +133,24 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver a buf for each packet (using net_rx()).
   //
+
+  uint32 ridx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  struct rx_desc *r = &rx_ring[ridx];
+
+  while (r->status & E1000_TXD_STAT_DD) {
+    net_rx((char *)r->addr, r->length);
+
+    char *buf = kalloc();
+    if (buf == 0)
+      panic("e1000_recv: kalloc failed\n");
+    memset(buf, 0, PGSIZE);
+
+    acquire(&e1000_lock);
+    r->addr = (uint64)buf;
+    r->status = 0;
+    regs[E1000_RDT] = (ridx + 1) % RX_RING_SIZE;
+    release(&e1000_lock);
+  }
 
 }
 
