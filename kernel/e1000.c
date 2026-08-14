@@ -137,19 +137,21 @@ e1000_recv(void)
   uint32 ridx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
   struct rx_desc *r = &rx_ring[ridx];
 
-  while (r->status & E1000_TXD_STAT_DD) {
+  while (r->status & E1000_RXD_STAT_DD) {
     net_rx((char *)r->addr, r->length);
 
     char *buf = kalloc();
     if (buf == 0)
       panic("e1000_recv: kalloc failed\n");
-    memset(buf, 0, PGSIZE);
 
     acquire(&e1000_lock);
     r->addr = (uint64)buf;
     r->status = 0;
-    regs[E1000_RDT] = (ridx + 1) % RX_RING_SIZE;
+    regs[E1000_RDT] = ridx;
     release(&e1000_lock);
+    
+    ridx = (ridx + 1) % RX_RING_SIZE;
+    r = &rx_ring[ridx];
   }
 
 }

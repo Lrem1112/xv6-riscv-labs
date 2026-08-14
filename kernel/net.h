@@ -69,6 +69,13 @@ struct udp {
   uint16 sum;   // checksum
 };
 
+#define MAX_UDP_PACKETS 16
+#define MAX_UDP_BIND_TABLE 10
+struct udp_queue {
+  uint16 port, qlen, qh, qt; // qh头指针指向第一个包，qt尾指针指向第一个空位
+  char *packets[MAX_UDP_PACKETS];
+};
+
 // an ARP packet (comes after an Ethernet header).
 struct arp {
   uint16 hrd; // format of hardware address
