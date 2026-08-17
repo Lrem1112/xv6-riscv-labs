@@ -125,28 +125,46 @@ static void
 read_acquire_inner(struct rwspinlock *rwlk)
 {
   // Replace this with your implementation.
-  acquire(&rwlk->l);
+  while (1) {
+    while (__atomic_load_n(&rwlk->w, __ATOMIC_SEQ_CST) ||
+           __atomic_load_n(&rwlk->wpending, __ATOMIC_SEQ_CST))
+      ;
+    __atomic_add_fetch(&rwlk->r, 1, __ATOMIC_SEQ_CST);
+
+    // 复查: 登记和上面的检查之间有窗口，写者可能在这期间插队。
+    if(!__atomic_load_n(&rwlk->w, __ATOMIC_SEQ_CST) &&
+      !__atomic_load_n(&rwlk->wpending, __ATOMIC_SEQ_CST))
+      return;
+    __atomic_sub_fetch(&rwlk->r, 1, __ATOMIC_SEQ_CST);
+  }
+
 }
 
 static void
 read_release_inner(struct rwspinlock *rwlk)
 {
   // Replace this with your implementation.
-  release(&rwlk->l);
+  __atomic_sub_fetch(&rwlk->r, 1, __ATOMIC_SEQ_CST);
 }
 
 static void
 write_acquire_inner(struct rwspinlock *rwlk)
 {
   // Replace this with your implementation.
-  acquire(&rwlk->l);
+  __atomic_add_fetch(&rwlk->wpending, 1, __ATOMIC_SEQ_CST);
+  while(__atomic_load_n(&rwlk->r, __ATOMIC_SEQ_CST) != 0)
+    ;
+
+  while(__atomic_exchange_n(&rwlk->w, 1, __ATOMIC_SEQ_CST) != 0)
+    ;
 }
 
 static void
 write_release_inner(struct rwspinlock *rwlk)
 {
   // Replace this with your implementation.
-  release(&rwlk->l);
+  __atomic_store_n(&rwlk->w, 0, __ATOMIC_SEQ_CST);
+  __atomic_sub_fetch(&rwlk->wpending, 1, __ATOMIC_SEQ_CST);
 }
 
 void
@@ -181,7 +199,9 @@ void
 initrwlock(struct rwspinlock *rwlk)
 {
   // Replace this with your implementation.
-  initlock(&rwlk->l, "rwlk");
+  rwlk->r = 0;
+  rwlk->wpending = 0;
+  rwlk->w = 0;
 }
 
 // Test rwspinlock implementation.
