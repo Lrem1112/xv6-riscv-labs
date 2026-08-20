@@ -29,6 +29,8 @@ struct inode {
   uint addrs[NDIRECT+2];
 };
 
+#define MAX_SYMLINK_DEPTH 10
+
 // map major device number to device functions.
 struct devsw {
   int (*read)(int, uint64, int);

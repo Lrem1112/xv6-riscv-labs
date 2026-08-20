@@ -301,6 +301,41 @@ create(char *path, short type, short major, short minor)
   return 0;
 }
 
+struct inode *walksymlnk(char *path, int follow, int depth)
+{
+  struct inode *ip;
+  int n;
+
+  if (depth <= 0)
+    return 0;
+
+  if ((ip = namei(path)) == 0)
+    return 0;
+
+  // 必须加锁后才能查看 ip->type：namei 可能返回 icache 中尚未加载
+  // （valid==0）的条目，其字段是上一个占用者的残留值，
+  // 直到 ilock() 从磁盘重新读取才会更新。
+  ilock(ip);
+
+  // 不是符号链接，或指定了 O_NOFOLLOW：原样返回该 inode
+  // （不加锁，与 namei 的约定一致），由 sys_open 自行 ilock。
+  if (ip->type != T_SYMLINK || !follow) {
+    iunlock(ip);
+    return ip;
+  }
+
+  // 是需要跟随的符号链接：从它的数据中读出目标路径。
+  n = readi(ip, 0, (uint64)path, 0, MAXPATH);
+  iunlockput(ip);
+  if (n <= 0)
+    return 0;
+  if (n >= MAXPATH)
+    n = MAXPATH - 1;
+  path[n] = 0;  // 写入时目标路径不带结尾的 NUL 字符
+
+  return walksymlnk(path, follow, depth - 1);
+}
+
 uint64
 sys_open(void)
 {
@@ -323,7 +358,7 @@ sys_open(void)
       return -1;
     }
   } else {
-    if((ip = namei(path)) == 0){
+    if((ip = walksymlnk(path, !(omode & O_NOFOLLOW), MAX_SYMLINK_DEPTH)) == 0){
       end_op();
       return -1;
     }
@@ -502,4 +537,65 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+// symlink(char *target, char *path)
+uint64 sys_symlink(void) {
+  struct inode *ip, *dp;
+  char name[DIRSIZ];
+  char target[MAXPATH];
+  char path[MAXPATH];
+
+  argstr(0, target, MAXPATH);
+  if (argstr(1, path, MAXPATH) == 0)
+    return -1;
+
+  begin_op();
+
+  if ((dp = nameiparent(path, name)) == 0) {
+    end_op();
+    return -1;
+  }
+
+  ilock(dp);
+
+  // 目录项已存在，创建失败（并释放 dirlookup 取得的引用）。
+  struct inode *eip;
+  if ((eip = dirlookup(dp, name, 0)) != 0) {
+    iput(eip);
+    iunlockput(dp);
+    end_op();
+    return -1;
+  }
+
+  if ((ip = ialloc(dp->dev, T_SYMLINK)) == 0) {
+    iunlockput(dp);
+    end_op();
+    return -1;
+  }
+
+  ilock(ip);
+  ip->nlink = 1;
+  iupdate(ip);
+
+  writei(ip, 0, (uint64)target, 0, strlen(target));
+
+  if (dirlink(dp, name, ip->inum) < 0)
+    goto fail;
+
+  // 成功：释放睡眠锁以及 ialloc 取得的引用。
+  iunlockput(ip);
+  iunlockput(dp);
+  end_op();
+
+  return 0;
+
+fail:
+  // 出错了：回收 ip 占用的 inode。
+  ip->nlink = 0;
+  iupdate(ip);
+  iunlockput(ip);
+  iunlockput(dp);
+  end_op();
+  return -1;
 }
