@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fs.h"
+#include "sleeplock.h"
+#include "file.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -146,6 +150,8 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  memset(p->vma, 0, sizeof(p->vma));
+
   return p;
 }
 
@@ -169,6 +175,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  memset(p->vma, 0, sizeof(p->vma));
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -295,6 +302,13 @@ kfork(void)
   np->parent = p;
   release(&wait_lock);
 
+  for (int i = 0; i < NVMA; i++) {
+    if (p->vma[i].valid) {
+      filedup(p->vma[i].vfile);
+      memmove(&np->vma[i], &p->vma[i], sizeof(struct vma));
+    }
+  }
+
   acquire(&np->lock);
   np->state = RUNNABLE;
   release(&np->lock);
@@ -341,6 +355,36 @@ kexit(int status)
   iput(p->cwd);
   end_op();
   p->cwd = 0;
+
+  for (int i = 0; i < NVMA; i++) {
+    if (p->vma[i].valid && (p->vma[i].flags & MAP_SHARED)) {
+      uint64 va = p->vma[i].addr;
+      uint64 end = p->vma[i].addr + p->vma[i].len;
+      while (va < end && walkaddr(p->pagetable, va)) {
+        uint64 size = end - va;
+        if (size > PGSIZE)
+          size = PGSIZE;
+
+        begin_op();
+        ilock(p->vma[i].vfile->ip);
+        uint64 off = p->vma[i].offset + (va - p->vma[i].addr);
+        uint64 n = size;
+        if (off >= p->vma[i].vfile->ip->size)
+          n = 0;
+        else if (off + n > p->vma[i].vfile->ip->size)
+          n = p->vma[i].vfile->ip->size - off;
+        writei(p->vma[i].vfile->ip, 1, va, off, n);
+        iunlock(p->vma[i].vfile->ip);
+        end_op();
+
+        va = va + size;
+      }
+
+      uvmunmap(p->pagetable, p->vma[i].addr, p->vma[i].len / PGSIZE, 1);
+      p->vma[i].valid = 0;
+      fileclose(p->vma[i].vfile);
+    }
+  }
 
   acquire(&wait_lock);
 

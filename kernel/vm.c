@@ -7,6 +7,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "fs.h"
+#include "defs.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
@@ -455,12 +459,56 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
   uint64 mem;
   struct proc *p = myproc();
 
-  if (va >= p->sz)
+  // guard against addresses in the trapframe/trampoline pages and
+  // above (walk() panics on va >= MAXVA, e.g. when copyin() calls
+  // vmfault() for a bogus address like 0xffffffffffffffff).
+  if (va >= TRAPFRAME)
     return 0;
+
   va = PGROUNDDOWN(va);
   if(ismapped(pagetable, va)) {
     return 0;
   }
+
+  for (int i = 0; i < NVMA; i++) {
+    if (!p->vma[i].valid)
+      continue;
+
+    uint64 vma_start = p->vma[i].addr;
+    uint64 vma_end = p->vma[i].addr + p->vma[i].len;
+    if (va >= vma_start && va < vma_end) {
+      mem = (uint64)kalloc();
+      if (mem == 0)
+        return 0;
+      memset((void *)mem, 0, PGSIZE);
+
+      uint64 file_offset = PGROUNDDOWN(va) - vma_start;
+      struct inode *ip = p->vma[i].vfile->ip;
+      int size = (PGSIZE < (vma_end - va) ? PGSIZE : (vma_end - va));
+
+      ilock(ip);
+      readi(ip, 0, mem, file_offset + p->vma[i].offset, size);
+      iunlock(ip);
+
+      int prot = p->vma[i].prot;
+      int perm = PTE_U;
+      if (prot & PROT_READ)
+        perm |= PTE_R;
+      if (prot & PROT_WRITE)
+        perm |= PTE_W;
+
+      if (mappages(p->pagetable, va, size, mem, perm) != 0) {
+        kfree((void *)mem);
+        return 0;
+      }
+
+      return mem;
+    }
+  }
+
+  if (va >= p->sz)
+    return 0;
+
   mem = (uint64) kalloc();
   if(mem == 0)
     return 0;

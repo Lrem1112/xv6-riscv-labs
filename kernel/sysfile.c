@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -502,4 +503,142 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64 getMmapAddr(struct proc* p, int len) {
+  len = PGROUNDUP(len);
+  uint64 va = TRAPFRAME - len;
+
+  while (va >= p->sz) {
+    int conflict = 0;
+
+    for (int i = 0; i < NVMA; i++) {
+      if (p->vma[i].valid) {
+        uint64 vma_start = p->vma[i].addr;
+        uint64 vma_end = p->vma[i].addr + p->vma[i].len;
+
+        // 判定和其他vma是否重叠
+        if (va < vma_end && (va + len) > vma_start) {
+          conflict = 1;
+          va = vma_start - len;
+          break;
+        }
+      }
+    }
+
+    if (!conflict)
+      return va;
+  }
+
+  return 0; // 无可用地址空间
+}
+
+// void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset);
+uint64 sys_mmap(void) {
+  uint64 addr;
+  size_t len;
+  int prot;
+  int flags;
+  struct file *f;
+  int offset;
+  
+  argaddr(0, &addr);
+  argaddr(1, &len);
+  argint(2, &prot);
+  argint(3, &flags);
+  if(argfd(4, 0, &f) < 0)
+    return -1;
+  argint(5, &offset);
+
+  if((prot & PROT_READ) && !f->readable)
+    return -1;
+
+  if ((prot & PROT_WRITE) && (flags & MAP_SHARED) && !(f->writable))
+    return -1;
+
+  struct proc *p = myproc();
+
+  int i;
+  for (i = 0; i < NVMA; i++) {
+    if (!p->vma[i].valid)
+      break;
+  }
+  if (i >= NVMA)
+    return -1;
+
+  if ((p->vma[i].addr = getMmapAddr(p, len)) == 0)
+    return -1;
+  p->vma[i].valid = 1;
+  p->vma[i].len = len;
+  p->vma[i].prot = prot;
+  p->vma[i].flags = flags;
+  p->vma[i].offset = offset;
+  filedup(f);
+  p->vma[i].vfile = f;
+
+  return p->vma[i].addr;
+}
+
+// int munmap(void *addr, size_t len);
+uint64 sys_munmap(void) {
+  uint64 addr, len;
+  argaddr(0, &addr);
+  argaddr(1, &len);
+
+  struct proc *p = myproc();
+  struct vma *v = 0;
+  for (int i = 0; i < NVMA; i++) {
+    if (p->vma[i].valid) {
+      uint64 vma_start = p->vma[i].addr;
+      uint64 vma_end = p->vma[i].addr + p->vma[i].len;
+
+      if (addr >= vma_start && addr < vma_end) {
+        v = &p->vma[i];
+        break;
+      }
+    }
+  }
+
+  if (!v)
+    panic("sys_munmap: invalid addr in vma\n");
+
+  if (len > v->len)
+    len = v->len;
+
+  uint64 va = addr;
+  uint64 end = addr + len;
+  while ((v->flags & MAP_SHARED) && va < addr + len && walkaddr(p->pagetable, va)) {
+    uint64 size = end - va;
+    if (size > PGSIZE)
+      size = PGSIZE;
+
+    begin_op();
+    ilock(v->vfile->ip);
+    uint64 off = v->offset + (va - v->addr);
+    uint64 n = size;
+    if (off >= v->vfile->ip->size)
+      n = 0;
+    else if (off + n > v->vfile->ip->size)
+      n = v->vfile->ip->size - off;
+    writei(v->vfile->ip, 1, va, off, n);
+    iunlock(v->vfile->ip);
+    end_op();
+
+    va = va + size;
+  }
+
+  uvmunmap(p->pagetable, addr, len / PGSIZE, 1);
+  if (addr == v->addr) {
+    v->addr += len;
+    v->offset += len;
+    v->len -= len;
+  } else {
+    v->len = addr - v->addr;
+  }
+  if (v->len == 0) {
+    v->valid = 0;
+    fileclose(v->vfile);
+  }
+
+  return len;
 }
