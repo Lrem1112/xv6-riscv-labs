@@ -27,3 +27,4 @@ barrier
 *.pcap
 TAGS
 .cache/
+fs.img.bk
